@@ -14,7 +14,7 @@ Steps:
 """
 
 import sys
-import re
+from statistics import mean
 import os.path
 import csv
 from collections import defaultdict
@@ -49,13 +49,14 @@ def download_assertions(cache_folder):
         else:
             print("Successfully created the directory %s" % cache_folder)
 
+    print("Downloading conceptnet-assertions-5.7.0.csv.gz")
     assertion_gz_file = "%s/conceptnet-assertions-5.7.0.csv.gz"%cache_folder
     if not os.path.exists(assertion_gz_file):
         url = "https://s3.amazonaws.com/conceptnet/downloads/2019/edges/conceptnet-assertions-5.7.0.csv.gz"
         download(url, assertion_gz_file)
 
     assertion_csv_file = "%s/assertions.csv"%cache_folder
-    print('extracting conceptnet.csv.gz file')
+    print('Extracting conceptnet.csv.gz file')
     if not os.path.exists(assertion_csv_file):
         with gzip.open(assertion_gz_file, 'rb') as f_in:
             with open(assertion_csv_file, 'wb') as f_out:
@@ -66,7 +67,9 @@ def extract_lang_assertions(language, cache_folder):
     assertions_file = '%s/assertions.csv'%cache_folder
     if not os.path.isfile(assertions_file):
         download_assertions(cache_folder)
-    
+
+    print("Extracting assertions for language: %s"%language)
+
     lang_str='/c/%s/'%language
     assertions_lang_file = "%s/conceptnet-%s.csv"%(cache_folder, language)
 
@@ -90,15 +93,25 @@ def generate_topn_ent_rel(output_folder, assertion_lang_file, topn_ents=20000):
     :param topn_ents:
     :return:
     '''
-    n_ent_rel_dict = defaultdict(int)
+    n_ent_rel_dict_head = defaultdict(int)
+    n_ent_rel_dict_tail = defaultdict(int)
     relations = set([])
+
     with open(assertion_lang_file) as rf:
         for line in rf:
             row = line.strip().split('\t')
             relations.add(row[1])
-            n_ent_rel_dict[row[0]] += 1
-            n_ent_rel_dict[row[-1]] += 1
-    ordered_entities = sorted(n_ent_rel_dict.items(), \
+            n_ent_rel_dict_head[row[0]] += 1
+            n_ent_rel_dict_tail[row[-1]] += 1
+
+    head_ents = set(n_ent_rel_dict_head.keys())
+    tail_ents = set(n_ent_rel_dict_tail.keys())
+
+    entities = list(head_ents.union(tail_ents))
+
+    n_ent_avg_head_tail = {ent: mean([n_ent_rel_dict_head[ent], n_ent_rel_dict_tail[ent]]) for ent in entities}
+
+    ordered_entities = sorted(n_ent_avg_head_tail.items(), \
                             key=lambda x: x[1], \
                             reverse=True)[:topn_ents]
 
@@ -168,8 +181,12 @@ if __name__=='__main__':
 
         assertion_lang_file = "%s/conceptnet-%s.csv"%(cache_folder, language)
         if not os.path.isfile(assertion_lang_file):
+            print("Assertions file for the language not found!")
+            print("Creating the Assertions file in cache folder")
             extract_lang_assertions(language, cache_folder)
 
+        print('Extracting top n-most popular concepts')
         generate_topn_ent_rel(output_folder, assertion_lang_file, topn_ents)
-        
+
+        print('Creating train2id.txt file')
         create_train2id(output_folder, assertion_lang_file)
